@@ -4,8 +4,8 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <RootNamespace>NanoNotepadSetup</RootNamespace>
-    <AssemblyName>NanoNotepadSetup</AssemblyName>
+    <RootNamespace>TermpadSetup</RootNamespace>
+    <AssemblyName>TermpadSetup</AssemblyName>
     <Version>1.0.0</Version>
   </PropertyGroup>
   <ItemGroup>

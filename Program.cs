@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace NanoNotepad;
+namespace Termpad;
 
 internal static class Program
 {

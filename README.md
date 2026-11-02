@@ -1,4 +1,4 @@
-# NanoNotepad
+# Termpad
 
 Консольный текстовый редактор в духе `nano` для Windows: нумерация строк, подсветка синтаксиса, поиск и замена, отмена/повтор действий. Один исполняемый файл, без зависимостей.
 
@@ -14,11 +14,11 @@
 
 ## Установка
 
-Скачайте `NanoNotepadSetup.exe` из раздела [Releases](../../releases) и запустите.
+Скачайте `TermpadSetup.exe` из раздела [Releases](../../releases) и запустите.
 
 Установщик (для текущего пользователя, без прав администратора):
 
-- распаковывает редактор в `%LOCALAPPDATA%\Programs\NanoNotepad`
+- распаковывает редактор в `%LOCALAPPDATA%\Programs\Termpad`
 - добавляет `bin` в начало пользовательского `PATH`
 - создаёт ярлык в меню «Пуск»
 - регистрирует удаление в «Параметры → Приложения»
@@ -26,9 +26,11 @@
 После установки откройте новый терминал:
 
 ```powershell
-nano
-nano file.txt
+term
+term file.txt
 ```
+
+Короткий псевдоним — `nn`.
 
 Параметры установщика:
 
@@ -73,7 +75,7 @@ nano file.txt
 .\build.ps1
 ```
 
-Скрипт публикует self-contained приложение, упаковывает его в `installer\payload.zip` и собирает установщик в `dist\NanoNotepadSetup.exe`.
+Скрипт публикует self-contained приложение, упаковывает его в `installer\payload.zip` и собирает установщик в `dist\TermpadSetup.exe`.
 
 Параметры:
 
@@ -93,15 +95,15 @@ git push origin v1.0.0
 GitHub Actions соберёт установщик и прикрепит его к релизу автоматически. Вручную:
 
 ```powershell
-gh release create v1.0.0 .\dist\NanoNotepadSetup.exe --generate-notes
+gh release create v1.0.0 .\dist\TermpadSetup.exe --generate-notes
 ```
 
 ## Удаление
 
-«Параметры → Приложения → NanoNotepad» или:
+«Параметры → Приложения → Termpad» или:
 
 ```powershell
-NanoNotepadSetup.exe --uninstall
+TermpadSetup.exe --uninstall
 ```
 
 ## Лицензия

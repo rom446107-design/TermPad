@@ -10,8 +10,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = $PSScriptRoot
-$appProject = Join-Path $root 'NanoNotepad.csproj'
-$installerProject = Join-Path $root 'installer\NanoNotepadSetup.csproj'
+$appProject = Join-Path $root 'Termpad.csproj'
+$installerProject = Join-Path $root 'installer\TermpadSetup.csproj'
 $payloadDir = Join-Path $root 'installer\payload'
 $payloadZip = Join-Path $root 'installer\payload.zip'
 $installerOut = Join-Path $root 'installer\publish'
@@ -45,7 +45,7 @@ Write-Host "версия: $Version, конфигурация: $Configuration, п
 if (Test-Path -LiteralPath $payloadDir) { Remove-Item -LiteralPath $payloadDir -Recurse -Force }
 New-Item -ItemType Directory -Path $payloadDir | Out-Null
 
-Invoke-Step 'Публикация NanoNotepad' {
+Invoke-Step 'Публикация Termpad' {
     & $dotnet publish $appProject -c $Configuration -r $Runtime --self-contained true `
         -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
         -p:DebugType=None -p:Version=$Version -o $payloadDir
@@ -63,10 +63,10 @@ Invoke-Step 'Сборка установщика' {
 }
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-$setup = Join-Path $installerOut 'NanoNotepadSetup.exe'
+$setup = Join-Path $installerOut 'TermpadSetup.exe'
 if (-not (Test-Path -LiteralPath $setup)) { throw "Установщик не найден: $setup" }
 
-$target = Join-Path $OutputDir 'NanoNotepadSetup.exe'
+$target = Join-Path $OutputDir 'TermpadSetup.exe'
 Copy-Item -LiteralPath $setup -Destination $target -Force
 
 $sizeMb = [math]::Round((Get-Item -LiteralPath $target).Length / 1MB, 1)

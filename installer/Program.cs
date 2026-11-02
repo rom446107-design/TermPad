@@ -9,12 +9,12 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-namespace NanoNotepadSetup;
+namespace TermpadSetup;
 
 internal static class Program
 {
-    private const string AppName = "NanoNotepad";
-    private const string DisplayName = "NanoNotepad";
+    private const string AppName = "Termpad";
+    private const string DisplayName = "Termpad";
     private static readonly string Version =
         (Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
@@ -94,7 +94,7 @@ internal static class Program
 
         if (!options.Silent)
         {
-            Console.WriteLine("NanoNotepad " + Version + " — установка");
+            Console.WriteLine("Termpad " + Version + " — установка");
             Console.WriteLine("Папка: " + installDir);
             Console.Write("Продолжить? (Y/n): ");
             string? answer = Console.ReadLine();
@@ -109,8 +109,9 @@ internal static class Program
         Directory.CreateDirectory(binDir);
 
         ExtractPayload(installDir);
-        WriteWrapper(Path.Combine(binDir, "nano.cmd"));
+        WriteWrapper(Path.Combine(binDir, "term.cmd"));
         WriteWrapper(Path.Combine(binDir, "nn.cmd"));
+        TryDeleteFile(Path.Combine(binDir, "nano.cmd"));
         WriteUninstallScript(installDir);
 
         if (!options.NoPath) AddUserPath(binDir);
@@ -118,8 +119,8 @@ internal static class Program
         if (!options.NoRegistry) RegisterUninstall(installDir, exePath);
 
         Console.WriteLine("Установлено: " + exePath);
-        Console.WriteLine("Команды nano и nn доступны из нового терминала.");
-        Console.WriteLine("Запуск: nano файл.txt");
+        Console.WriteLine("Команды term и nn доступны из нового терминала.");
+        Console.WriteLine("Запуск: term файл.txt");
 
         if (!options.Silent)
         {
@@ -138,7 +139,7 @@ internal static class Program
 
         if (!options.Silent)
         {
-            Console.WriteLine("Удаление NanoNotepad");
+            Console.WriteLine("Удаление Termpad");
             Console.WriteLine("Папка: " + installDir);
             Console.Write("Удалить? (y/N): ");
             string? answer = Console.ReadLine();
@@ -175,7 +176,7 @@ internal static class Program
             }
         }
 
-        Console.WriteLine("NanoNotepad удалён.");
+        Console.WriteLine("Termpad удалён.");
 
         if (!options.Silent)
         {
@@ -210,7 +211,7 @@ internal static class Program
 
     private static void WriteWrapper(string wrapperPath)
     {
-        File.WriteAllText(wrapperPath, "@echo off\r\n\"%~dp0..\\NanoNotepad.exe\" %*\r\n", new UTF8Encoding(false));
+        File.WriteAllText(wrapperPath, "@echo off\r\n\"%~dp0..\\Termpad.exe\" %*\r\n", new UTF8Encoding(false));
     }
 
     private static void AddUserPath(string binDir)
@@ -258,7 +259,7 @@ internal static class Program
             shortcut.TargetPath = exePath;
             shortcut.WorkingDirectory = installDir;
             shortcut.IconLocation = exePath + ",0";
-            shortcut.Description = "NanoNotepad — консольный редактор";
+            shortcut.Description = "Termpad — консольный редактор";
             shortcut.Save();
         }
         catch (Exception ex)
@@ -299,8 +300,8 @@ internal static class Program
             @"  $parts = $p.Split(';') | Where-Object { $_ -ne '' -and $_.TrimEnd('\') -ne $bin.TrimEnd('\') }",
             "  [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')",
             "}",
-            @"Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NanoNotepad.lnk') -Force",
-            @"Remove-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NanoNotepad' -Recurse -Force",
+            @"Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Termpad.lnk') -Force",
+            @"Remove-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Termpad' -Recurse -Force",
             "Set-Location $env:TEMP",
             @"Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('ping 127.0.0.1 -n 5 >nul & rmdir /s /q ""' + $dir + '""') -WindowStyle Hidden"
         };
