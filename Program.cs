@@ -20,17 +20,39 @@ internal static class Program
         {
         }
 
-        var editor = new Editor();
-        if (args.Length > 0) editor.TryOpen(args[0]);
+        if (args.Any(argument => argument.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
+        {
+            Uninstall.Run(args);
+            return;
+        }
+
+        string? configPath = null;
+        string? file = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--config" && i + 1 < args.Length)
+            {
+                configPath = args[++i];
+                continue;
+            }
+
+            file ??= args[i];
+        }
+
+        var editor = new Editor(EditorConfig.Load(configPath));
+        if (file is not null) editor.TryOpen(file);
         editor.Run();
     }
 }
 
 internal sealed class Editor
 {
+    private readonly EditorConfig config;
     private readonly List<StringBuilder> lines = new() { new StringBuilder() };
     private readonly List<Snapshot> undo = new();
     private readonly List<Snapshot> redo = new();
+    private long undoChars;
+    private long redoChars;
     private readonly List<string> cutBuffer = new();
 
     private int row;
@@ -47,12 +69,20 @@ internal sealed class Editor
     private Lang stateLang = Lang.Plain;
     private Lang? languageOverride;
 
+    public Editor(EditorConfig settings)
+    {
+        config = settings;
+        languageOverride = ParseLanguage(settings.DefaultLanguage);
+        if (!string.IsNullOrEmpty(settings.LoadWarning)) status = settings.LoadWarning;
+    }
+
     private sealed class Snapshot
     {
         public List<string> Lines = new();
         public int Row;
         public int Col;
         public bool Dirty;
+        public long Chars;
     }
 
     private enum Lang
@@ -61,7 +91,8 @@ internal sealed class Editor
         CSharp,
         Python,
         JavaScript,
-        Json
+        Json,
+        Go
     }
 
     private enum LangState
@@ -69,7 +100,8 @@ internal sealed class Editor
         Normal,
         BlockComment,
         TripleSingle,
-        TripleDouble
+        TripleDouble,
+        RawString
     }
 
     private enum TokenKind
@@ -114,6 +146,16 @@ internal sealed class Editor
         "let", "new", "null", "of", "private", "protected", "public", "readonly", "return", "set",
         "static", "super", "switch", "this", "throw", "true", "try", "type", "typeof", "undefined",
         "var", "void", "while", "with", "yield"
+    };
+
+    private static readonly HashSet<string> GoKeywords = new(StringComparer.Ordinal)
+    {
+        "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
+        "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range",
+        "return", "select", "struct", "switch", "type", "var",
+        "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8",
+        "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32",
+        "uint64", "uintptr", "true", "false", "nil", "iota"
     };
 
     private static (int Width, int Height) ScreenSize()
@@ -286,7 +328,7 @@ internal sealed class Editor
                 InsertNewLine();
                 break;
             case ConsoleKey.Tab:
-                InsertText("    ");
+                InsertText(new string(' ', config.TabSize));
                 break;
             case ConsoleKey.Backspace:
                 Backspace();
@@ -317,9 +359,11 @@ internal sealed class Editor
         int helpRow2 = Math.Max(4, height - 1);
 
         int digits = Math.Max(2, lines.Count.ToString().Length);
-        int gutterWidth = Math.Min(digits + 3, Math.Max(2, totalWidth - 1));
+        int gutterWidth = config.ShowLineNumbers
+            ? Math.Min(digits + 3, Math.Max(2, totalWidth - 1))
+            : 0;
         int textWidth = Math.Max(1, totalWidth - gutterWidth);
-        Lang lang = CurrentLanguage();
+        Lang lang = config.SyntaxHighlighting ? CurrentLanguage() : Lang.Plain;
 
         try
         {
@@ -345,7 +389,7 @@ internal sealed class Editor
             for (int i = 0; i < viewRows; i++)
             {
                 int index = topRow + i;
-                RenderGutter(index, 1 + i, gutterWidth, digits);
+                if (config.ShowLineNumbers) RenderGutter(index, 1 + i, gutterWidth, digits);
                 RenderText(index, 1 + i, gutterWidth, textWidth, lang);
             }
 
@@ -458,12 +502,15 @@ internal sealed class Editor
             ".py" => Lang.Python,
             ".js" or ".jsx" or ".ts" or ".tsx" or ".mjs" or ".cjs" => Lang.JavaScript,
             ".json" => Lang.Json,
+            ".go" => Lang.Go,
             _ => Lang.Plain
         };
     }
 
     private string HighlightLabel()
     {
+        if (!config.SyntaxHighlighting) return "подсветка: выкл";
+
         if (languageOverride is null)
         {
             Lang auto = AutoLanguage();
@@ -481,12 +528,27 @@ internal sealed class Editor
             Lang.CSharp => Lang.Python,
             Lang.Python => Lang.JavaScript,
             Lang.JavaScript => Lang.Json,
-            Lang.Json => Lang.Plain,
+            Lang.Json => Lang.Go,
+            Lang.Go => Lang.Plain,
             _ => null
         };
 
         stateCache.Clear();
         status = "Подсветка — " + HighlightLabel();
+    }
+
+    private static Lang? ParseLanguage(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "plain" => Lang.Plain,
+            "csharp" or "cs" => Lang.CSharp,
+            "python" or "py" => Lang.Python,
+            "javascript" or "js" or "ts" => Lang.JavaScript,
+            "json" => Lang.Json,
+            "go" or "golang" => Lang.Go,
+            _ => null
+        };
     }
 
     private static string LanguageName(Lang lang)
@@ -497,6 +559,7 @@ internal sealed class Editor
             Lang.Python => "Python",
             Lang.JavaScript => "JS/TS",
             Lang.Json => "JSON",
+            Lang.Go => "Go",
             _ => "текст"
         };
     }
@@ -552,6 +615,16 @@ internal sealed class Editor
                 continue;
             }
 
+            if (state == LangState.RawString)
+            {
+                int close = text.IndexOf('`', i);
+                int end = close < 0 ? text.Length : close + 1;
+                Paint(kinds, i, end, TokenKind.String);
+                i = end;
+                if (close >= 0) state = LangState.Normal;
+                continue;
+            }
+
             if (state == LangState.TripleSingle || state == LangState.TripleDouble)
             {
                 string delimiter = state == LangState.TripleSingle ? "'''" : "\"\"\"";
@@ -565,7 +638,7 @@ internal sealed class Editor
 
             char current = text[i];
 
-            if ((lang == Lang.CSharp || lang == Lang.JavaScript) && current == '/' && i + 1 < text.Length)
+            if ((lang == Lang.CSharp || lang == Lang.JavaScript || lang == Lang.Go) && current == '/' && i + 1 < text.Length)
             {
                 if (text[i + 1] == '/')
                 {
@@ -627,6 +700,20 @@ internal sealed class Editor
                 continue;
             }
 
+            if (lang == Lang.Go && current == '`')
+            {
+                int close = text.IndexOf('`', i + 1);
+                int end = close < 0 ? text.Length : close + 1;
+                Paint(kinds, i, end, TokenKind.String);
+                i = end;
+                if (close < 0)
+                {
+                    state = LangState.RawString;
+                    break;
+                }
+                continue;
+            }
+
             if (char.IsDigit(current) || (current == '.' && i + 1 < text.Length && char.IsDigit(text[i + 1])))
             {
                 int end = ScanNumber(text, i);
@@ -661,6 +748,7 @@ internal sealed class Editor
             Lang.Python => PythonKeywords.Contains(word),
             Lang.JavaScript => JavaScriptKeywords.Contains(word),
             Lang.Json => word == "true" || word == "false" || word == "null",
+            Lang.Go => GoKeywords.Contains(word),
             _ => false
         };
     }
@@ -878,10 +966,11 @@ internal sealed class Editor
     {
         PushUndo();
         string rest = lines[row].ToString(col, lines[row].Length - col);
+        string indent = IndentForNewLine();
         lines[row].Length = col;
-        lines.Insert(row + 1, new StringBuilder(rest));
+        lines.Insert(row + 1, new StringBuilder(indent + rest));
         row++;
-        col = 0;
+        col = indent.Length;
         dirty = true;
         status = "";
         InvalidateHighlight(row);
@@ -1043,22 +1132,115 @@ internal sealed class Editor
         status = "Вставлено строк: " + cutBuffer.Count;
     }
 
+    private string IndentForNewLine()
+    {
+        if (!config.AutoIndent) return "";
+
+        int leading = 0;
+        while (leading < lines[row].Length && lines[row][leading] == ' ') leading++;
+        if (col < leading) return "";
+
+        return new string(' ', leading);
+    }
+
     private void PushUndo()
     {
-        undo.Add(Capture());
-        if (undo.Count > 300) undo.RemoveAt(0);
+        Snapshot snapshot = Capture();
+        undo.Add(snapshot);
+        undoChars += snapshot.Chars;
+        TrimHistory(undo, ref undoChars);
         redo.Clear();
+        redoChars = 0;
+    }
+
+    private void TrimHistory(List<Snapshot> history, ref long chars)
+    {
+        long budget = config.UndoMemoryLimitMb * 1024L * 1024L;
+        while (history.Count > config.UndoLimit
+               || (history.Count > 1 && chars > budget))
+        {
+            chars -= history[0].Chars;
+            history.RemoveAt(0);
+        }
     }
 
     private Snapshot Capture()
     {
-        return new Snapshot
+        var snapshot = new Snapshot
         {
-            Lines = lines.Select(line => line.ToString()).ToList(),
             Row = row,
             Col = col,
             Dirty = dirty
         };
+
+        long chars = 0;
+        foreach (StringBuilder line in lines)
+        {
+            string text = line.ToString();
+            snapshot.Lines.Add(text);
+            chars += text.Length + 1;
+        }
+
+        snapshot.Chars = chars;
+        return snapshot;
+    }
+
+    private void WriteFileAtomic(string full, string contents)
+    {
+        string temp = full + ".termpad-" + Guid.NewGuid().ToString("N") + ".tmp";
+
+        try
+        {
+            File.WriteAllText(temp, contents, new UTF8Encoding(false));
+
+            if (!File.Exists(full))
+            {
+                File.Move(temp, full);
+                return;
+            }
+
+            try
+            {
+                File.Replace(temp, full, null);
+            }
+            catch (IOException)
+            {
+                File.Move(temp, full, true);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                File.Move(temp, full, true);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private bool FileIsTooLarge(string full)
+    {
+        try
+        {
+            var info = new FileInfo(full);
+            long limit = config.MaxFileSizeMb * 1024L * 1024L;
+            if (info.Exists && info.Length > limit)
+            {
+                status = "Файл больше " + config.MaxFileSizeMb + " МБ — открытие отменено";
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private void Restore(Snapshot snapshot)
@@ -1082,9 +1264,15 @@ internal sealed class Editor
             return;
         }
 
-        redo.Add(Capture());
-        Restore(undo[undo.Count - 1]);
+        Snapshot current = Capture();
+        redo.Add(current);
+        redoChars += current.Chars;
+        TrimHistory(redo, ref redoChars);
+
+        Snapshot previous = undo[undo.Count - 1];
+        Restore(previous);
         undo.RemoveAt(undo.Count - 1);
+        undoChars -= previous.Chars;
         status = "Отменено";
     }
 
@@ -1096,9 +1284,15 @@ internal sealed class Editor
             return;
         }
 
-        undo.Add(Capture());
-        Restore(redo[redo.Count - 1]);
+        Snapshot current = Capture();
+        undo.Add(current);
+        undoChars += current.Chars;
+        TrimHistory(undo, ref undoChars);
+
+        Snapshot next = redo[redo.Count - 1];
+        Restore(next);
         redo.RemoveAt(redo.Count - 1);
+        redoChars -= next.Chars;
         status = "Повторено";
     }
 
@@ -1114,7 +1308,8 @@ internal sealed class Editor
         try
         {
             string full = Path.GetFullPath(target.Trim());
-            File.WriteAllText(full, string.Join(Environment.NewLine, lines.Select(line => line.ToString())), new UTF8Encoding(false));
+            string contents = string.Join(Environment.NewLine, lines.Select(line => line.ToString()));
+            WriteFileAtomic(full, contents);
             path = full;
             dirty = false;
             status = "Записано строк: " + lines.Count + " — " + full;
@@ -1139,6 +1334,7 @@ internal sealed class Editor
         try
         {
             string full = Path.GetFullPath(target.Trim());
+            if (FileIsTooLarge(full)) return;
             LoadText(File.ReadAllText(full));
             path = full;
             dirty = false;
@@ -1155,6 +1351,7 @@ internal sealed class Editor
         try
         {
             string full = Path.GetFullPath(file);
+            if (FileIsTooLarge(full)) return;
             LoadText(File.ReadAllText(full));
             path = full;
             dirty = false;
@@ -1167,7 +1364,8 @@ internal sealed class Editor
 
     private void LoadText(string text)
     {
-        text = text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\t", "    ");
+        text = text.Replace("\r\n", "\n").Replace('\r', '\n')
+            .Replace("\t", new string(' ', config.TabSize));
 
         lines.Clear();
         foreach (string raw in text.Split('\n'))
@@ -1186,6 +1384,8 @@ internal sealed class Editor
         leftCol = 0;
         undo.Clear();
         redo.Clear();
+        undoChars = 0;
+        redoChars = 0;
         stateCache.Clear();
         typingGroup = false;
         status = "";
@@ -1349,8 +1549,9 @@ internal sealed class Editor
             "  M-U     отмена                 M-E  повтор",
             "",
             "  Стрелки, Home/End, PgUp/PgDn, Enter, Tab, Backspace, Del.",
-            "  Подсветка по расширению: .cs, .py, .js/.ts, .json. Номера строк — слева.",
-            "  F2      язык подсветки: авто/C#/Python/JS/JSON/нет",
+            "  Подсветка по расширению: .cs, .py, .js/.ts, .json, .go. Номера строк — слева.",
+            "  F2      язык подсветки: авто/C#/Python/JS/JSON/Go/нет",
+            "  Конфиг: %APPDATA%\\Termpad\\config.json (флаг --config, переменная TERMPAD_CONFIG)",
             "",
             "Нажмите любую клавишу для возврата."
         };

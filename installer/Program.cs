@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace TermpadSetup;
@@ -21,6 +22,8 @@ internal static class Program
          ?? "1.0.0").Split('+')[0];
     private const string Publisher = "Roman";
     private const string PayloadResource = "payload.zip";
+    private const string MarkerFileName = ".termpad";
+    private const string PathMutexName = @"Local\TermpadUserPath";
 
     private const uint WmSettingChange = 0x001A;
     private const uint SmtoAbortIfHung = 0x0002;
@@ -92,6 +95,12 @@ internal static class Program
         string binDir = Path.Combine(installDir, "bin");
         string exePath = Path.Combine(installDir, AppName + ".exe");
 
+        if (IsDriveRoot(installDir))
+        {
+            Console.WriteLine("Нельзя устанавливать в корень диска: " + installDir);
+            return 1;
+        }
+
         if (!options.Silent)
         {
             Console.WriteLine("Termpad " + Version + " — установка");
@@ -109,10 +118,11 @@ internal static class Program
         Directory.CreateDirectory(binDir);
 
         ExtractPayload(installDir);
+        WriteMarker(installDir);
         WriteWrapper(Path.Combine(binDir, "term.cmd"));
         WriteWrapper(Path.Combine(binDir, "nn.cmd"));
         TryDeleteFile(Path.Combine(binDir, "nano.cmd"));
-        WriteUninstallScript(installDir);
+        TryDeleteFile(Path.Combine(installDir, "uninstall.ps1"));
 
         if (!options.NoPath) AddUserPath(binDir);
         if (!options.NoShortcut) CreateStartMenuShortcut(exePath, installDir);
@@ -148,6 +158,12 @@ internal static class Program
                 Console.WriteLine("Отменено.");
                 return 0;
             }
+        }
+
+        if (Directory.Exists(installDir) && !IsTermpadInstall(installDir))
+        {
+            Console.WriteLine("В папке нет установленного Termpad — удаление отменено: " + installDir);
+            return 1;
         }
 
         RemoveUserPath(binDir);
@@ -209,41 +225,103 @@ internal static class Program
         }
     }
 
+    private static void WriteMarker(string installDir)
+    {
+        File.WriteAllText(
+            Path.Combine(installDir, MarkerFileName),
+            "Termpad " + Version + "\r\n",
+            new UTF8Encoding(false));
+    }
+
     private static void WriteWrapper(string wrapperPath)
     {
         File.WriteAllText(wrapperPath, "@echo off\r\n\"%~dp0..\\Termpad.exe\" %*\r\n", new UTF8Encoding(false));
     }
 
+    private static bool IsDriveRoot(string path)
+    {
+        string full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string? root = Path.GetPathRoot(full)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(full, root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTermpadInstall(string directory)
+    {
+        try
+        {
+            string full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (IsDriveRoot(full)) return false;
+            if (File.Exists(Path.Combine(full, MarkerFileName))) return true;
+
+            return File.Exists(Path.Combine(full, AppName + ".exe"))
+                && File.Exists(Path.Combine(full, "bin", "term.cmd"));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WithPathLock(Action action)
+    {
+        using var mutex = new Mutex(false, PathMutexName);
+        bool acquired = false;
+
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(10));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            action();
+        }
+        finally
+        {
+            if (acquired) mutex.ReleaseMutex();
+        }
+    }
+
     private static void AddUserPath(string binDir)
     {
-        string normalized = Path.GetFullPath(binDir).TrimEnd('\\');
-        string? current = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User);
-        var parts = (current ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
+        WithPathLock(() =>
+        {
+            string normalized = Path.GetFullPath(binDir).TrimEnd('\\');
+            string? current = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User);
+            var parts = (current ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
 
-        if (parts.Any(part => string.Equals(part.TrimEnd('\\'), normalized, StringComparison.OrdinalIgnoreCase)))
-            return;
+            if (parts.Any(part => string.Equals(part.TrimEnd('\\'), normalized, StringComparison.OrdinalIgnoreCase)))
+                return;
 
-        parts.Insert(0, normalized);
-        Environment.SetEnvironmentVariable("Path", string.Join(";", parts), EnvironmentVariableTarget.User);
-        BroadcastEnvironmentChange();
+            parts.Insert(0, normalized);
+            Environment.SetEnvironmentVariable("Path", string.Join(";", parts), EnvironmentVariableTarget.User);
+            BroadcastEnvironmentChange();
+        });
     }
 
     private static void RemoveUserPath(string binDir)
     {
-        string? current = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User);
-        if (string.IsNullOrEmpty(current)) return;
-
-        string normalized = Path.GetFullPath(binDir).TrimEnd('\\');
-        var parts = current.Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Where(part => !string.Equals(part.TrimEnd('\\'), normalized, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        string updated = string.Join(";", parts);
-        if (!string.Equals(updated, current, StringComparison.Ordinal))
+        WithPathLock(() =>
         {
-            Environment.SetEnvironmentVariable("Path", updated, EnvironmentVariableTarget.User);
-            BroadcastEnvironmentChange();
-        }
+            string? current = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User);
+            if (string.IsNullOrEmpty(current)) return;
+
+            string normalized = Path.GetFullPath(binDir).TrimEnd('\\');
+            var parts = current.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Where(part => !string.Equals(part.TrimEnd('\\'), normalized, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            string updated = string.Join(";", parts);
+            if (!string.Equals(updated, current, StringComparison.Ordinal))
+            {
+                Environment.SetEnvironmentVariable("Path", updated, EnvironmentVariableTarget.User);
+                BroadcastEnvironmentChange();
+            }
+        });
     }
 
     private static void CreateStartMenuShortcut(string exePath, string installDir)
@@ -279,37 +357,31 @@ internal static class Program
         key.SetValue("InstallLocation", installDir);
         key.SetValue("DisplayIcon", exePath);
 
-        string uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"" +
-                           Path.Combine(installDir, "uninstall.ps1") + "\"";
+        string uninstall = "\"" + exePath + "\" --uninstall --silent";
         key.SetValue("UninstallString", uninstall);
         key.SetValue("QuietUninstallString", uninstall);
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
     }
 
-    private static void WriteUninstallScript(string installDir)
+    private static string EscapeSingleQuotes(string value)
     {
-        string escaped = installDir.Replace("'", "''");
-        string[] lines =
-        {
-            "$ErrorActionPreference = 'SilentlyContinue'",
-            "$dir = '" + escaped + "'",
-            "$bin = Join-Path $dir 'bin'",
-            "$p = [Environment]::GetEnvironmentVariable('Path','User')",
-            "if ($p) {",
-            @"  $parts = $p.Split(';') | Where-Object { $_ -ne '' -and $_.TrimEnd('\') -ne $bin.TrimEnd('\') }",
-            "  [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')",
-            "}",
-            @"Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Termpad.lnk') -Force",
-            @"Remove-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Termpad' -Recurse -Force",
-            "Set-Location $env:TEMP",
-            @"Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('ping 127.0.0.1 -n 5 >nul & rmdir /s /q ""' + $dir + '""') -WindowStyle Hidden"
-        };
+        return value.Replace("'", "''");
+    }
 
-        File.WriteAllText(
-            Path.Combine(installDir, "uninstall.ps1"),
-            string.Join("\r\n", lines) + "\r\n",
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+    private static string BuildEncodedCleanup(string directory)
+    {
+        string full = Path.GetFullPath(directory);
+        string marker = Path.Combine(full, MarkerFileName);
+        string exe = Path.Combine(full, AppName + ".exe");
+
+        string command =
+            "Start-Sleep -Seconds 2; " +
+            "if ((Test-Path -LiteralPath '" + EscapeSingleQuotes(marker) + "') -or " +
+            "(Test-Path -LiteralPath '" + EscapeSingleQuotes(exe) + "')) { " +
+            "Remove-Item -LiteralPath '" + EscapeSingleQuotes(full) + "' -Recurse -Force }";
+
+        return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
     }
 
     private static string? ReadInstallDir()
@@ -341,11 +413,10 @@ internal static class Program
     {
         try
         {
-            string arguments = "/c ping 127.0.0.1 -n 5 >nul & rmdir /s /q \"" + directory + "\"";
             Process.Start(new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = arguments,
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + BuildEncodedCleanup(directory),
                 CreateNoWindow = true,
                 UseShellExecute = false
             });

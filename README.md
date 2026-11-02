@@ -4,7 +4,7 @@
 
 ## Возможности
 
-- Подсветка синтаксиса: C#, Python, JavaScript/TypeScript, JSON (автоопределение по расширению, ручной выбор — `F2`)
+- Подсветка синтаксиса: C#, Python, JavaScript/TypeScript, JSON, Go (автоопределение по расширению, ручной выбор — `F2`)
 - Номера строк и текущая позиция курсора
 - Поиск, поиск далее, замена
 - Отмена/повтор, вырезание/вставка строк
@@ -43,6 +43,36 @@ term file.txt
 | `--no-registry` | не регистрировать удаление |
 | `--uninstall` | удалить редактор |
 
+## Настройки
+
+При первом запуске создаётся `%APPDATA%\Termpad\config.json`:
+
+```json
+{
+  "tabSize": 4,
+  "showLineNumbers": true,
+  "syntaxHighlighting": true,
+  "autoIndent": true,
+  "undoLimit": 300,
+  "undoMemoryLimitMb": 256,
+  "maxFileSizeMb": 100,
+  "defaultLanguage": "auto"
+}
+```
+
+| Параметр | Значения | Назначение |
+| --- | --- | --- |
+| `tabSize` | 1..16 | ширина отступа по `Tab` |
+| `showLineNumbers` | `true`/`false` | номера строк слева |
+| `syntaxHighlighting` | `true`/`false` | подсветка синтаксиса |
+| `autoIndent` | `true`/`false` | сохранять отступ при `Enter` |
+| `undoLimit` | 10..10000 | шагов истории отмены |
+| `undoMemoryLimitMb` | 16..4096 | лимит памяти для истории отмены |
+| `maxFileSizeMb` | 1..4096 | максимальный размер открываемого файла |
+| `defaultLanguage` | `auto`, `plain`, `csharp`, `python`, `javascript`, `json`, `go` | язык подсветки при старте |
+
+В файле можно оставлять комментарии `//`. Другой путь задаётся флагом `--config <путь>` или переменной `TERMPAD_CONFIG`. Некорректные значения игнорируются, причина показывается в строке состояния.
+
 ## Горячие клавиши
 
 | Клавиши | Действие |
@@ -63,7 +93,7 @@ term file.txt
 | `Ctrl+C` | позиция курсора |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | отмена / повтор |
 | `Alt+U` / `Alt+E` | отмена / повтор |
-| `F2` | язык подсветки: авто/C#/Python/JS/JSON/нет |
+| `F2` | язык подсветки: авто/C#/Python/JS/JSON/Go/нет |
 
 Также работают стрелки, `Home`, `End`, `PgUp`, `PgDn`, `Enter`, `Tab`, `Backspace`, `Delete`.
 
