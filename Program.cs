@@ -57,6 +57,7 @@ internal sealed class Editor
 
     private int row;
     private int col;
+    private int goalCol = -1;
     private int topRow;
     private int leftCol;
     private string? path;
@@ -210,6 +211,11 @@ internal sealed class Editor
         bool alt = (key.Modifiers & ConsoleModifiers.Alt) != 0;
         bool ctrl = (key.Modifiers & ConsoleModifiers.Control) != 0;
         bool shift = (key.Modifiers & ConsoleModifiers.Shift) != 0;
+
+        bool vertical = key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow
+            or ConsoleKey.PageUp or ConsoleKey.PageDown
+            || (ctrl && key.Key is ConsoleKey.Y or ConsoleKey.V);
+        if (!vertical) goalCol = -1;
 
         if (ctrl && alt)
         {
@@ -365,8 +371,19 @@ internal sealed class Editor
         int textWidth = Math.Max(1, totalWidth - gutterWidth);
         Lang lang = config.SyntaxHighlighting ? CurrentLanguage() : Lang.Plain;
 
+        bool cursorHidden = false;
+
         try
         {
+            try
+            {
+                Console.CursorVisible = false;
+                cursorHidden = true;
+            }
+            catch
+            {
+            }
+
             try
             {
                 if (OperatingSystem.IsWindows()
@@ -406,6 +423,19 @@ internal sealed class Editor
         }
         catch (ArgumentOutOfRangeException)
         {
+        }
+        finally
+        {
+            if (cursorHidden)
+            {
+                try
+                {
+                    Console.CursorVisible = true;
+                }
+                catch
+                {
+                }
+            }
         }
     }
 
@@ -1026,8 +1056,9 @@ internal sealed class Editor
     {
         if (row > 0)
         {
+            goalCol = goalCol >= 0 ? goalCol : col;
             row--;
-            col = Math.Min(col, lines[row].Length);
+            col = Math.Min(goalCol, lines[row].Length);
         }
     }
 
@@ -1035,8 +1066,9 @@ internal sealed class Editor
     {
         if (row < lines.Count - 1)
         {
+            goalCol = goalCol >= 0 ? goalCol : col;
             row++;
-            col = Math.Min(col, lines[row].Length);
+            col = Math.Min(goalCol, lines[row].Length);
         }
     }
 
@@ -1070,8 +1102,9 @@ internal sealed class Editor
     {
         var (_, height) = ScreenSize();
         int viewRows = Math.Max(1, height - 4);
+        goalCol = goalCol >= 0 ? goalCol : col;
         row = Math.Clamp(row + direction * viewRows, 0, lines.Count - 1);
-        col = Math.Min(col, lines[row].Length);
+        col = Math.Min(goalCol, lines[row].Length);
     }
 
     private void CutLine(bool append)
@@ -1380,6 +1413,7 @@ internal sealed class Editor
 
         row = 0;
         col = 0;
+        goalCol = -1;
         topRow = 0;
         leftCol = 0;
         undo.Clear();
